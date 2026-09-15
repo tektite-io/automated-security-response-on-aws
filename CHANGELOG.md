@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.2] - 2026-09-15
+
+### Fixed
+
+- Fixed the member stack failing to deploy to more than one Region in the same account. The `ASR-RemediationConfigBucketAccess` IAM managed policy used a fixed name, and because IAM managed policies are account-global, the second Regional deployment failed with an "already exists" error. The policy is now named per Region and scoped to that Region's remediation configuration bucket. ([#323](https://github.com/aws-solutions/automated-security-response-on-aws/issues/323))
+- Removed a hardcoded IAM role name in the optional CloudTrail Action Log stack so CloudFormation generates a unique name. The Action Log feature remains supported in a single Region per account.
+
+### Changed
+
+- When upgrading from v4.0.0 or v4.0.1, the previous `ASR-RemediationConfigBucketAccess` managed policy is retained rather than deleted, so EC2 instances already patched by the Inspector.InstanceVulnerability remediation keep the access they were granted. This policy can be removed manually once no IAM role references it.
+
+### Security
+
+- Set a minimum `browserslist` version of 4.28.7 to prevent a transitive dependency from reintroducing [CVE-2026-73088](https://github.com/advisories/GHSA-73wf-gq98-2v4g).
+
 ## [4.0.1] - 2026-09-10
 
 ### Security

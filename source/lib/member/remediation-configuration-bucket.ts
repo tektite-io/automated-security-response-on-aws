@@ -22,13 +22,18 @@ import { addCfnGuardSuppression } from '../cdk-helper/add-cfn-guard-suppression'
 import { createLogGroup } from '../cdk-helper/log-group';
 import { getLambdaCode } from '../cdk-helper/lambda-code-manifest';
 
-// Fixed name for the customer-managed policy that grants read-only access to the
+// Name prefix for the customer-managed policy that grants read-only access to the
 // remediation configuration bucket. The Inspector.InstanceVulnerability remediation
 // role attaches this policy (by ARN, under an iam:PolicyARN condition) to the target
 // instance's IAM role, instead of holding an unconditioned iam:PutRolePolicy. The name
-// is fixed so both the remediation role's condition and the runbook script can derive
+// is derived so both the remediation role's condition and the runbook script can build
 // the same ARN at deploy time and at runtime.
-export const REMEDIATION_CONFIG_BUCKET_ACCESS_POLICY_NAME = 'ASR-RemediationConfigBucketAccess';
+
+export const REMEDIATION_CONFIG_BUCKET_ACCESS_POLICY_NAME_PREFIX = 'ASR-RemediationConfigBucketAccess';
+
+export function buildRemediationConfigBucketAccessPolicyName(region: string): string {
+  return `${REMEDIATION_CONFIG_BUCKET_ACCESS_POLICY_NAME_PREFIX}-${region}`;
+}
 
 export interface RemediationConfigurationBucketProps {
   readonly solutionId: string;
@@ -68,7 +73,12 @@ export class RemediationConfigurationBucket extends Construct {
       enforceSSL: true,
       publicReadAccess: false,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
-      removalPolicy: RemovalPolicy.RETAIN,
+      // RETAIN_ON_UPDATE_OR_DELETE keeps this bucket (and its GuardDuty backups, snapshots, and
+      // patch overrides) on a genuine stack delete, but lets CloudFormation clean it up if a
+      // first-time member-stack create rolls back. The bucket name is deterministic
+      // (so0111-asr-remediation-<region>-<account>), so plain RETAIN would strand the empty bucket
+      // and make the next create fail with BucketAlreadyOwnedByYou.
+      removalPolicy: RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE,
       serverAccessLogsBucket: accessLogsBucket,
       serverAccessLogsPrefix: 'remediation-config-access-logs/',
       lifecycleRules: [
@@ -157,10 +167,11 @@ export class RemediationConfigurationBucket extends Construct {
     // an iam:PolicyARN condition scoped to this exact policy — removing the need for an
     // unconditioned iam:PutRolePolicy on role/* (which was a privilege-escalation primitive).
     const remediationConfigBucketAccessPolicy = new ManagedPolicy(scope, 'RemediationConfigBucketAccessPolicy', {
-      managedPolicyName: REMEDIATION_CONFIG_BUCKET_ACCESS_POLICY_NAME,
+      managedPolicyName: buildRemediationConfigBucketAccessPolicyName(stack.region),
       description:
-        'Read-only access to the ASR remediation configuration bucket (patch and baseline overrides). ' +
-        'Attached by the Inspector.InstanceVulnerability remediation to the target EC2 instance role.',
+        'Read-only access to the ASR remediation configuration bucket (patch and baseline overrides) ' +
+        `in ${stack.region}. Attached by the Inspector.InstanceVulnerability remediation to the ` +
+        'target EC2 instance role.',
       document: new PolicyDocument({
         statements: [
           new PolicyStatement({
@@ -178,9 +189,18 @@ export class RemediationConfigurationBucket extends Construct {
     });
     addCfnGuardSuppression(remediationConfigBucketAccessPolicy, 'IAM_POLICYDOCUMENT_NO_WILDCARD_RESOURCE');
     // Explicit managedPolicyName is required: the Inspector.InstanceVulnerability remediation role is
-    // granted iam:AttachRolePolicy under an iam:PolicyARN condition scoped to this exact policy ARN, so
+    // granted iam:AttachRolePolicy under an iam:PolicyARN condition scoped to this policy's name, so
     // the name must be deterministic/known at deploy time.
     addCfnGuardSuppression(remediationConfigBucketAccessPolicy, 'CFN_NO_EXPLICIT_RESOURCE_NAMES');
+    // The remediation attaches this policy to the target instance's IAM role and never detaches it,
+    // so IAM refuses to delete it (DeleteConflict) while any patched instance role still holds it.
+    // RETAIN_ON_UPDATE_OR_DELETE renders UpdateReplacePolicy: Retain and DeletionPolicy:
+    // RetainExceptOnCreate. UpdateReplacePolicy: Retain is what matters for the upgrade path: a
+    // release that used the un-suffixed name renames the policy, and the replacement must not try to
+    // delete the still-attached old one. RetainExceptOnCreate additionally lets CloudFormation clean
+    // the policy up if a first-time member-stack create rolls back — plain RETAIN would strand the
+    // deterministically named policy and make the next create fail with EntityAlreadyExists.
+    remediationConfigBucketAccessPolicy.applyRemovalPolicy(RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE);
 
     // Store bucket name in SSM for use by control runbooks
     new StringParameter(scope, 'RemediationConfigurationBucketNameParam', {
