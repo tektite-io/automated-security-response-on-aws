@@ -28,7 +28,7 @@ import SsmDocRateLimit from './ssm-doc-rate-limit';
 import NamespaceParam from './parameters/namespace-param';
 import { addCfnGuardSuppression } from './cdk-helper/add-cfn-guard-suppression';
 import { MemberRolesStack } from './member-roles-stack';
-import { REMEDIATION_CONFIG_BUCKET_ACCESS_POLICY_NAME } from './member/remediation-configuration-bucket';
+import { REMEDIATION_CONFIG_BUCKET_ACCESS_POLICY_NAME_PREFIX } from './member/remediation-configuration-bucket';
 
 export interface StackProps extends cdk.StackProps {
   readonly solutionId: string;
@@ -4794,16 +4794,24 @@ export class RemediationRunbookStack extends cdk.Stack {
       // read-only S3 policy to whatever IAM role the target instance already
       // has, so the target role ARN cannot be pre-known (hence role/*). Unlike
       // the removed iam:PutRolePolicy, AttachRolePolicy supports the iam:PolicyARN
-      // condition key, so the attach is scoped to exactly the deploy-time
-      // RemediationConfigBucketAccess managed policy. The role therefore cannot
-      // write arbitrary (e.g. admin) policy content onto any role — closing the
-      // privilege-escalation path while preserving the remediation's function.
+      // condition key, so the attach is scoped to the RemediationConfigBucketAccess
+      // managed policies. The role therefore cannot write arbitrary (e.g. admin)
+      // policy content onto any role — closing the privilege-escalation path while
+      // preserving the remediation's function.
+      //
+      // ArnLike on the name prefix rather than ArnEquals on one ARN: this stack is
+      // deployed once per account, but the policy it points at is created by the
+      // per-region member stack and so is region-suffixed. The
+      // prefix therefore has to stand in for "the policy in whichever region this
+      // remediation runs". The pattern still cannot be turned into an escalation
+      // primitive: matching it requires creating a policy under a solution-owned
+      // name, and this role holds no iam:CreatePolicy or iam:CreatePolicyVersion.
       const iamAttachS3PolicyPerms = new PolicyStatement();
       iamAttachS3PolicyPerms.addActions('iam:AttachRolePolicy');
       iamAttachS3PolicyPerms.effect = Effect.ALLOW;
       iamAttachS3PolicyPerms.addResources(`arn:${this.partition}:iam::${this.account}:role/*`);
-      iamAttachS3PolicyPerms.addCondition('ArnEquals', {
-        'iam:PolicyARN': `arn:${this.partition}:iam::${this.account}:policy/${REMEDIATION_CONFIG_BUCKET_ACCESS_POLICY_NAME}`,
+      iamAttachS3PolicyPerms.addCondition('ArnLike', {
+        'iam:PolicyARN': `arn:${this.partition}:iam::${this.account}:policy/${REMEDIATION_CONFIG_BUCKET_ACCESS_POLICY_NAME_PREFIX}-*`,
       });
       inlinePolicy.addStatements(iamAttachS3PolicyPerms);
 
@@ -4848,7 +4856,7 @@ export class RemediationRunbookStack extends cdk.Stack {
               reason:
                 'Resource * is required for ssm:DescribeInstanceInformation, ssm:GetCommandInvocation, ec2:DescribeInstances, and securityhub:BatchUpdateFindings which do not support resource-level permissions. ' +
                 'iam:AttachRolePolicy is granted on role/* because the remediation attaches a read-only S3 policy to the existing IAM role of the EC2 instance being patched, and the instance role name is not known at deploy time. ' +
-                'It is constrained by an iam:PolicyARN condition to exactly the deploy-time RemediationConfigBucketAccess managed policy, so no arbitrary or privilege-granting policy can be attached to any role.',
+                'It is constrained by an iam:PolicyARN condition to the deploy-time RemediationConfigBucketAccess managed policies, so no arbitrary or privilege-granting policy can be attached to any role.',
             },
           ],
         },

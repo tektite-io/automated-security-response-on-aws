@@ -202,16 +202,16 @@ describe('MemberRolesStack tests', () => {
     });
     expect(putRolePolicyAllows).toHaveLength(0);
 
-    // The remediation instead attaches the fixed RemediationConfigBucketAccess
-    // managed policy, scoped by an iam:PolicyARN condition so no arbitrary
-    // (e.g. admin) policy can be attached to any role. (A separate statement
-    // attaches AmazonSSMManagedInstanceCore under its own condition; select the
-    // one bound to the bucket-access policy specifically.)
+    // The remediation instead attaches a RemediationConfigBucketAccess managed
+    // policy, scoped by an iam:PolicyARN condition so no arbitrary (e.g. admin)
+    // policy can be attached to any role. (A separate statement attaches
+    // AmazonSSMManagedInstanceCore under its own condition; select the one bound
+    // to the bucket-access policy specifically.)
     const scopedAttachStatement = inspectorStatements.find((statement) => {
       const action = statement.Action;
       const actions = Array.isArray(action) ? action : [action];
-      const policyArnCondition = (statement.Condition as { ArnEquals?: { 'iam:PolicyARN'?: unknown } } | undefined)
-        ?.ArnEquals?.['iam:PolicyARN'];
+      const policyArnCondition = (statement.Condition as { ArnLike?: { 'iam:PolicyARN'?: unknown } } | undefined)
+        ?.ArnLike?.['iam:PolicyARN'];
       return (
         statement.Effect === 'Allow' &&
         actions.includes('iam:AttachRolePolicy') &&
@@ -220,8 +220,17 @@ describe('MemberRolesStack tests', () => {
     });
     expect(scopedAttachStatement).toBeDefined();
     // The scoped attach applies to role/* (the instance role name is unknown at
-    // deploy time) but is constrained to exactly the bucket-access policy ARN.
+    // deploy time) but is constrained to the bucket-access policy name.
     expect(JSON.stringify(scopedAttachStatement?.Resource)).toContain(':role/*');
+
+    // This stack is deployed once per account while the policy it points at is
+    // created per region, so the condition matches the region-suffixed names
+    // rather than one exact ARN. The trailing wildcard must stay
+    // bound to the solution-owned prefix.
+    const policyArnPattern = JSON.stringify(
+      (scopedAttachStatement?.Condition as { ArnLike: { 'iam:PolicyARN': unknown } }).ArnLike['iam:PolicyARN'],
+    );
+    expect(policyArnPattern).toContain(':policy/ASR-RemediationConfigBucketAccess-*');
   });
 });
 

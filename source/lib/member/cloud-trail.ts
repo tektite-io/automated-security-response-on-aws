@@ -144,10 +144,8 @@ export class MemberCloudTrailStack extends Stack {
     // Role that allows S3 to trigger the EventProcessor function
     const s3TriggerRole = new Role(this, 'S3TriggerRole', {
       assumedBy: new ServicePrincipal('s3.amazonaws.com'),
-      roleName: 'CloudTrailS3EventTriggerLambdaRole',
     });
     eventProcessorFunction.grantInvoke(s3TriggerRole);
-    addCfnGuardSuppression(s3TriggerRole, 'CFN_NO_EXPLICIT_RESOURCE_NAMES');
 
     const lambdaDestination = new s3n.LambdaDestination(eventProcessorFunction);
     trailLoggingBucket.addEventNotification(s3.EventType.OBJECT_CREATED, lambdaDestination, {

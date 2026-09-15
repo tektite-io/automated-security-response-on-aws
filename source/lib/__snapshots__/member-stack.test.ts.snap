@@ -2056,6 +2056,7 @@ def sort_filter_rules(json_obj):
       "Type": "AWS::S3::BucketPolicy",
     },
     "RemediationConfigBucketAccessPolicyF4D04687": {
+      "DeletionPolicy": "RetainExceptOnCreate",
       "Metadata": {
         "guard": {
           "SuppressedRules": [
@@ -2065,8 +2066,29 @@ def sort_filter_rules(json_obj):
         },
       },
       "Properties": {
-        "Description": "Read-only access to the ASR remediation configuration bucket (patch and baseline overrides). Attached by the Inspector.InstanceVulnerability remediation to the target EC2 instance role.",
-        "ManagedPolicyName": "ASR-RemediationConfigBucketAccess",
+        "Description": {
+          "Fn::Join": [
+            "",
+            [
+              "Read-only access to the ASR remediation configuration bucket (patch and baseline overrides) in ",
+              {
+                "Ref": "AWS::Region",
+              },
+              ". Attached by the Inspector.InstanceVulnerability remediation to the target EC2 instance role.",
+            ],
+          ],
+        },
+        "ManagedPolicyName": {
+          "Fn::Join": [
+            "",
+            [
+              "ASR-RemediationConfigBucketAccess-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
         "Path": "/",
         "PolicyDocument": {
           "Statement": [
@@ -2119,6 +2141,7 @@ def sort_filter_rules(json_obj):
         },
       },
       "Type": "AWS::IAM::ManagedPolicy",
+      "UpdateReplacePolicy": "Retain",
     },
     "RemediationConfigMonitoringTopicC62EFF45": {
       "Properties": {
@@ -2169,7 +2192,7 @@ def sort_filter_rules(json_obj):
       "Type": "AWS::SNS::TopicPolicy",
     },
     "RemediationConfigurationBucketF5FA3D12": {
-      "DeletionPolicy": "Retain",
+      "DeletionPolicy": "RetainExceptOnCreate",
       "Properties": {
         "BucketEncryption": {
           "ServerSideEncryptionConfiguration": [

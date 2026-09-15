@@ -212,7 +212,9 @@ describe('member stack', function () {
 
     it('is present with correct configuration', function () {
       template.hasResource('AWS::S3::Bucket', {
-        DeletionPolicy: 'Retain',
+        // RetainExceptOnCreate: kept on a real delete, but cleaned up if a first-time create rolls
+        // back so the deterministically named bucket is not stranded for the next attempt.
+        DeletionPolicy: 'RetainExceptOnCreate',
         Properties: {
           BucketName: {
             ['Fn::Join']: ['', ['so0111-asr-remediation-', { Ref: 'AWS::Region' }, '-', { Ref: 'AWS::AccountId' }]],
@@ -327,7 +329,7 @@ describe('member stack', function () {
 
     it('remediation config bucket-access managed policy is present and scoped to the bucket', function () {
       template.hasResourceProperties('AWS::IAM::ManagedPolicy', {
-        ManagedPolicyName: 'ASR-RemediationConfigBucketAccess',
+        ManagedPolicyName: { ['Fn::Join']: ['', ['ASR-RemediationConfigBucketAccess-', { Ref: 'AWS::Region' }]] },
         PolicyDocument: {
           Statement: [
             {
@@ -348,6 +350,25 @@ describe('member stack', function () {
               Resource: { ['Fn::GetAtt']: [bucketLogicalId, 'Arn'] },
             },
           ],
+        },
+      });
+    });
+
+    it('remediation config bucket-access managed policy is retained on delete and replacement', function () {
+      // The remediation attaches this policy to patched instance roles and never detaches it,
+      // so IAM refuses to delete it while any role still holds it. UpdateReplacePolicy: Retain lets
+      // the region-suffix rename succeed on upgrade instead of failing to delete the old policy;
+      // DeletionPolicy: RetainExceptOnCreate still lets a rolled-back first-time create clean up so
+      // the deterministically named policy is not stranded. Scope the assertion to the
+      // RemediationConfigBucketAccess policy specifically, so it fails if that policy loses these
+      // settings even while some other managed policy keeps them.
+      template.hasResource('AWS::IAM::ManagedPolicy', {
+        DeletionPolicy: 'RetainExceptOnCreate',
+        UpdateReplacePolicy: 'Retain',
+        Properties: {
+          ManagedPolicyName: {
+            ['Fn::Join']: ['', ['ASR-RemediationConfigBucketAccess-', { Ref: 'AWS::Region' }]],
+          },
         },
       });
     });
